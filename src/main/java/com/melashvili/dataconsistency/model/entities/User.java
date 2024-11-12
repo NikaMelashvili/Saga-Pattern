@@ -26,4 +26,7 @@ public class User {
     @OneToOne(cascade = CascadeType.ALL)
     @JoinColumn(name = "user_info_id")
     private UserInfo userInfo;
+
+    @Transient
+    private String sagaId;
 }

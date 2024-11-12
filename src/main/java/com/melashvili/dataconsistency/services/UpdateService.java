@@ -6,11 +6,8 @@ import com.melashvili.dataconsistency.model.request.AddUserRequestDTO;
 import com.melashvili.dataconsistency.model.request.UpdateUserRequestDTO;
 import com.melashvili.dataconsistency.repositories.UserInfoRepository;
 import com.melashvili.dataconsistency.repositories.UserRepository;
-import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-import java.util.UUID;
 
 @Service
 public class UpdateService {
@@ -50,77 +47,6 @@ public class UpdateService {
         this.userInfoRepository = userInfoRepository;
     }
 
-    public void addUser(AddUserRequestDTO addUserRequestDTO) {
-        UserInfo userInfo = new UserInfo();
-        userInfo.setBirthDate(addUserRequestDTO.getBirthDate());
-        constructUser(userInfo, addUserRequestDTO.getAddress(), addUserRequestDTO.getFirstName(), addUserRequestDTO.getLastName());
-    }
-
-    @Transactional
-    public String ADICUpdate(UpdateUserRequestDTO updateUserRequestDTO) {
-        String sagaId = generateSagaId();
-
-        try {
-            UserInfo newUserInfo = new UserInfo();
-            newUserInfo.setAddress(updateUserRequestDTO.getAddress());
-
-            User newUser = new User();
-            newUser.setFirstName(updateUserRequestDTO.getFirstName());
-            newUser.setLastName(updateUserRequestDTO.getLastName());
-            newUser.setUserInfo(newUserInfo);
-
-            User oldUser;
-            try {
-                oldUser = userRepository.findById(updateUserRequestDTO.getOldId());
-            } catch (Exception e) {
-                throw new RuntimeException("User with old ID not found");
-            }
-            Integer oldId = oldUser.getId();
-
-            userInfoRepository.deleteById(oldId);
-            userRepository.deleteById(oldId);
-
-            newUserInfo.setId(null);
-            userInfoService.save(newUserInfo);
-            Integer newId = newUserInfo.getId();
-
-            newUser.setId(newId);
-            userService.save(newUser);
-
-            userElasticService.saveToElasticsearch(newUser);
-
-            return "User with old ID " + updateUserRequestDTO.getOldId() + " was successfully updated to new ID " + newUserInfo.getId();
-
-        } catch (Exception e) {
-            rollbackUpdate(updateUserRequestDTO.getOldId(), sagaId);
-            return "Update failed, compensating actions executed.";
-        }
-    }
-
-    // Compensation logic (Rollback)
-    private void rollbackUpdate(int oldId, String sagaId) {
-        try {
-            try {
-                User oldUser = userRepository.findById(oldId);
-            } catch (Exception e) {
-                throw new RuntimeException("User with old ID not found");
-            }
-
-            userElasticService.rollback(sagaId);
-
-            // Rollback new User and UserInfo entities
-            userRepository.deleteById(oldUser.getId());
-            userInfoRepository.deleteById(oldUser.getUserInfo().getId());
-
-        } catch (Exception rollbackException) {
-            // Log rollback exception if needed
-        }
-    }
-
-    private String generateSagaId() {
-        return UUID.randomUUID().toString();
-    }
-
     private void constructUser(UserInfo updatedUserInfo,
                                String address,
                                String firstName,
@@ -140,14 +66,75 @@ public class UpdateService {
         userElasticService.saveToElasticsearch(updatedUser);
     }
 
-    private boolean deleteUser(int oldId) {
+    public void addUser(AddUserRequestDTO addUserRequestDTO) {
+        UserInfo userInfo = new UserInfo();
+        userInfo.setBirthDate(addUserRequestDTO.getBirthDate());
+        constructUser(userInfo,
+                addUserRequestDTO.getAddress(),
+                addUserRequestDTO.getFirstName(),
+                addUserRequestDTO.getLastName());
+    }
+
+    public String ADICUpdate(UpdateUserRequestDTO updateUserRequestDTO) {
+        User oldUser = userRepository.findById(updateUserRequestDTO.getOldId());
+        User newUser = null;
+
         try {
-            userInfoRepository.deleteById(oldId);
-            userRepository.deleteById(oldId);
-            return true;
+            UserInfo newUserInfo = createNewUserInfo(updateUserRequestDTO, oldUser);
+            newUser = createNewUser(updateUserRequestDTO, newUserInfo);
+
+            userElasticService.saveToElasticsearch(newUser);
+
+            deleteOldUser(oldUser);
+
+            return "User with old ID " + oldUser.getId() +
+                    " was successfully updated with new ID " + newUser.getId();
         } catch (Exception e) {
-            return false;
+            rollbackSaga(newUser.getId());
+            return "Update failed, compensating actions executed.";
         }
     }
 
+    private UserInfo createNewUserInfo(UpdateUserRequestDTO dto, User oldUser) {
+        UserInfo userInfo = new UserInfo();
+        userInfo.setBirthDate(oldUser.getUserInfo().getBirthDate());
+        userInfo.setAddress(dto.getAddress());
+        userInfoService.save(userInfo);
+        return userInfo;
+    }
+
+    private User createNewUser(UpdateUserRequestDTO dto, UserInfo userInfo) {
+        User user = new User();
+        user.setFirstName(dto.getFirstName());
+        user.setLastName(dto.getLastName());
+        user.setUserInfo(userInfo);
+        userService.save(user);
+        return user;
+    }
+
+    private void deleteOldUser(User oldUser) {
+        if (oldUser != null) {
+            userInfoRepository.deleteById(oldUser.getUserInfo().getId());
+            userRepository.deleteById(oldUser.getId());
+        }
+    }
+
+    private void rollbackSaga(Integer id) {
+        rollbackNewUserInfo(id);
+        rollbackNewUser(id);
+    }
+
+    private void rollbackNewUserInfo(Integer id) {
+        UserInfo newUserInfo = userInfoRepository.findInfoById(id);
+        if (newUserInfo != null) {
+            userInfoRepository.delete(newUserInfo);
+        }
+    }
+
+    private void rollbackNewUser(int id) {
+        User newUser = userRepository.findById(id);
+        if (newUser != null) {
+            userRepository.delete(newUser);
+        }
+    }
 }

@@ -24,4 +24,7 @@ public class UserInfo {
 
     @Column(name = "address")
     private String address;
+
+    @Transient
+    private String sagaId;
 }

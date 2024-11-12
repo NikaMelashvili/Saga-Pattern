@@ -18,13 +18,11 @@ public class UserElasticService {
     }
 
     public void saveToElasticsearch(User user) {
-        // Map User entity to UserElastic model
         UserElastic userElastic = new UserElastic();
         userElastic.setId(user.getId());
         userElastic.setFirstName(user.getFirstName());
         userElastic.setLastName(user.getLastName());
 
-        // Map UserInfo entity to UserInfoElastic model
         UserInfoElastic userInfoElastic = new UserInfoElastic();
         userInfoElastic.setId(user.getUserInfo().getId());
         userInfoElastic.setBirthDate(user.getUserInfo().getBirthDate());
@@ -32,11 +30,6 @@ public class UserElasticService {
 
         userElastic.setUserInfo(userInfoElastic);
 
-        // Save to Elasticsearch
         userElasticRepository.save(userElastic);
-    }
-
-    public void rollback(String sagaId) {
-        userElasticRepository.deleteBySagaId(sagaId);
     }
 }
