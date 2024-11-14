@@ -23,6 +23,8 @@ public class UserElasticService {
         userElastic.setFirstName(user.getFirstName());
         userElastic.setLastName(user.getLastName());
 
+        userElastic = null;
+
         UserInfoElastic userInfoElastic = new UserInfoElastic();
         userInfoElastic.setId(user.getUserInfo().getId());
         userInfoElastic.setBirthDate(user.getUserInfo().getBirthDate());

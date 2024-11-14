@@ -1,5 +1,8 @@
 package com.melashvili.dataconsistency.services;
 
+import com.melashvili.dataconsistency.events.EventPublisher;
+import com.melashvili.dataconsistency.events.UserCreationFailedEvent;
+import com.melashvili.dataconsistency.events.UserInfoCreationFailedEvent;
 import com.melashvili.dataconsistency.model.entities.User;
 import com.melashvili.dataconsistency.model.entities.UserInfo;
 import com.melashvili.dataconsistency.model.request.AddUserRequestDTO;
@@ -21,6 +24,8 @@ public class UpdateService {
     private UserRepository userRepository;
 
     private UserInfoRepository userInfoRepository;
+
+    private EventPublisher eventPublisher;
 
     @Autowired
     public void setUserService(UserService userService) {
@@ -45,6 +50,11 @@ public class UpdateService {
     @Autowired
     public void setUserInfoRepository(UserInfoRepository userInfoRepository) {
         this.userInfoRepository = userInfoRepository;
+    }
+
+    @Autowired
+    public void setEventPublisher(EventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
     }
 
     private void constructUser(UserInfo updatedUserInfo,
@@ -78,9 +88,10 @@ public class UpdateService {
     public String ADICUpdate(UpdateUserRequestDTO updateUserRequestDTO) {
         User oldUser = userRepository.findById(updateUserRequestDTO.getOldId());
         User newUser = null;
+        UserInfo newUserInfo = null;
 
         try {
-            UserInfo newUserInfo = createNewUserInfo(updateUserRequestDTO, oldUser);
+            newUserInfo = createNewUserInfo(updateUserRequestDTO, oldUser);
             newUser = createNewUser(updateUserRequestDTO, newUserInfo);
 
             userElasticService.saveToElasticsearch(newUser);
@@ -90,8 +101,12 @@ public class UpdateService {
             return "User with old ID " + oldUser.getId() +
                     " was successfully updated with new ID " + newUser.getId();
         } catch (Exception e) {
-            rollbackSaga(newUser.getId());
-            return "Update failed, compensating actions executed.";
+            if (newUserInfo != null && newUser == null) {
+                eventPublisher.publish(new UserInfoCreationFailedEvent(newUserInfo.getId()));
+            } else if (newUser != null) {
+                eventPublisher.publish(new UserCreationFailedEvent(newUser.getId()));
+            }
+            return "Update failed";
         }
     }
 
